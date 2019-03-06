@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta content="text/html; charset=UTF-8" http-equiv="content-type" />
+<title>OW Custom game balancer</title>
+<meta name="description" content="Overwatch custom game balancer">
+<link rel="stylesheet" href="style.css">
+
+<script src="ow_defines.js"></script>
+<script src="common.js"></script>
+<script src="owapi.js"></script>
+<script src="stats_updater.js"></script>
+<script src="import_export.js"></script>
+<script src="ui.js"></script>
+<script src="balancer.js"></script>
+
+</head>
+
+<script language="JavaScript" type="text/javascript">
+// global variables
+var lobby = [];
+var team1 = [];
+var team2 = [];
+
+var player_being_added;
+var player_being_edited;
+var lobby_filter_timer = 0;
+
+var Settings = get_default_settings();
+var ExportOptions = get_default_export_options();
+const storage_prefix = "owcgb_";
+
+// class icons in data:url strings
+var class_icons_datauri = {};
+var rank_icons_datauri = {};
+
+
+// init stats updater
+StatsUpdater.onPlayerUpdated = on_player_stats_updated;
+StatsUpdater.onComplete = on_stats_update_complete;
+StatsUpdater.onStart = on_stats_update_start;
+StatsUpdater.onProgressChange = on_stats_update_progress;
+StatsUpdater.onError = on_stats_update_error;
+StatsUpdater.onWarning = on_stats_update_warning;
+
+
+</script>
+
+<body>
+
+<div class="page-title">Overwatch custom game balancer</div>
+<div class="copyright">2017-2018 by <a href="https://github.com/adminimusRU">l33t m3at</a> | Stats data by <a href="https://github.com/SunDwarf/OWAPI">OWAPI</a></div>
+<br/>
+
+<br/>
+<span style="color: green; text-shadow: 0 0 3px green; font: bold 22pt sans-serif; vertical-align: sub;">+</span>
+<input id="new_player_id" name="new_player_id" type="text" size=35 placeholder="BattleTag" value="" onkeyup="new_player_keyup(event);"/> 
+<button onclick="add_player_click();" id="add_btn" >Add player</button>
+<br/>
+<br/>
+
+<div class="table workspace">
+	<div class="row">
+		<div class="cell workspace-cell">
+			<!-- lobby -->
+			
+			
+			
+			<div class="team-toolbar">
+			<input title="Clear lobby" type="button" class="team_btn" onclick="clear_lobby();" value=" X "/>
+			<input title="Import lobby" id="import_lobby_btn" type="button" class="team_btn" onclick="import_lobby_dlg_open();" value="Import"/>
+			<input title="Export lobby" type="button" class="team_btn" onclick="export_lobby_dlg_open();" value="Export"/>
+			<button title="Sort lobby by class" class="team_btn" onclick="sort_lobby('class');">
+				&uarr;&darr;
+				<img src="class_icons/dps.png" style="height: 0.9em;">
+			</button>
+			<input title="Sort lobby by name" type="button" class="team_btn" onclick="sort_lobby('display_name');" value="&uarr;&darr;Az"/>
+			<input title="Sort lobby by SR" type="button" class="team_btn" onclick="sort_lobby('sr');" value="&uarr;&darr;123"/>
+			</div>
+			
+			<div>
+			<span class="team-title">Lobby</span>
+			</div>
+			
+			
+					
+			<span id="lobby_count">0</span> players<br/>
+			
+			<div style="display: flex; align-items: baseline">
+				<label for="lobby_filter">Filter: &nbsp;</label>
+				<input id="lobby_filter" class="filter" type="text" size=35 autocomplete="off" placeholder="player name or battletag" value="" oninput="on_lobby_filter_change();"/> 
+				<span onclick="lobby_filter_clear();" style="cursor: default;" title="Clear filter" alt="Clear filter"> &#9003; </span>
+			</div>
+			
+			<div class="lobby-container">
+				<div class="table team" id="lobby">
+
+				</div>
+			</div>
+			
+			<br/>
+			<div title="Drop player here to delete" class="trashcan" id="trashcan" ondrop="player_drop(event)" ondragover="player_allowDrop(event)">				
+				&#9760; Delete player (drop here)
+			</div>
+		</div>
+		
+		
+		<div class="cell" style="width: 5em">
+		<!-- spacer -->
+		</div>
+		
+		
+		<div class="cell team-cell">
+			<div class="team-toolbar">
+			<input title="Clear team and move all players to lobby" type="button" class="team_btn" onclick="move_team_to_lobby(team1);redraw_teams();" value=" X "/>
+			<button title="Sort team by class" class="team_btn" onclick="sort_team(team1, 'class');redraw_teams();">
+				&uarr;&darr;
+				<img src="class_icons/dps.png" style="height: 0.9em;">
+			</button>
+			<input title="Sort team by name" type="button" class="team_btn" onclick="sort_team(team1, 'display_name');redraw_teams();" value="&uarr;&darr;Az"/>
+			<input title="Sort team by SR" type="button" class="team_btn" onclick="sort_team(team1, 'sr');redraw_teams();" value="&uarr;&darr;123"/>
+			</div>
+			
+			<div>
+			<input id="team1_name" type="text" class="team-title" value="Team 1" autocomplete="off" onchange="save_team_name(this);">
+			</div>
+			
+			<span id="team1_sr">0</span> average SR<br/>
+			
+			<div class="table team" id="team1" style="background-color: DodgerBlue;">
+				<!-- team 1 players -->
+			</div>
+			
+			<br/>
+			<div >
+				<input class="big-btn" type="button" id="balance_btn" onclick="balance_teams();" value="&#9878; Balance teams" title="Automatically find most balanced compositions"/>
+				<br/>
+				<br/>
+				
+				<input class="big-btn" type="button" onclick="export_teams_dlg_open();" value="Export teams"/>
+				<br/>
+				<br/>
+				<br/>
+												
+				<input class="big-btn" type="button" id="settings_btn" onclick="settings_dlg_open();" value="&#9881; Settings" title="Open settings dialog"/>
+				<br/>
+				<br/>
+				<br/>
+				
+				<div style="display: flex">
+					<button class="medium-btn" style="display:none" onclick="add_test_players();">
+					Add test players</button>
+				
+					<button class="medium-btn" style="display:none" onclick="test();" value=""/>
+					test</button>
+				</div>
+				
+			</div>
+		</div>
+		
+		<div class="cell" style="vertical-align: top; padding-top: 10em; min-width: 5em; text-align: center;">
+		<br/>
+		<span style="font-size: 30pt;"><b><i>VS</i></b></span>
+		<br/>
+		<br/>
+		</div>
+		
+		<div class="cell team-cell">
+			<div class="team-toolbar">
+			<input title="Clear team and move all players to lobby" type="button" class="team_btn" onclick="move_team_to_lobby(team2);redraw_teams();" value=" X "/>
+			<button title="Sort team by class" class="team_btn" onclick="sort_team(team2, 'class');redraw_teams();">
+				&uarr;&darr;
+				<img src="class_icons/dps.png" style="height: 0.9em;">
+			</button>
+			<input title="Sort team by name" type="button" class="team_btn" onclick="sort_team(team2, 'display_name');redraw_teams();" value="&uarr;&darr;Az"/>
+			<input title="Sort team by SR" type="button" class="team_btn" onclick="sort_team(team2, 'sr');redraw_teams();" value="&uarr;&darr;123"/>
+			</div>
+			
+			<div>
+			<input id="team2_name" type="text" class="team-title" value="Team 2" autocomplete="off" onchange="save_team_name(this);">
+			</div>
+		
+			<span id="team2_sr">0</span> average SR<br/>
+			
+			<div class="table team" id="team2" style="background-color: tomato;">
+				<!-- team 2 players -->
+			</div>
+			
+			<br/>
+			
+			<div >
+				<div style="display: flex">
+					<button class="medium-btn" id="update_active_stats_btn" onclick="update_active_stats();" value="" title="Update stats for active players">&#8635; Update <br/> active players</button>
+				
+					<button id="update_all_stats_btn" class="medium-btn" onclick="update_all_stats();" value="" title="Update stats for all players" />&#8635; Update <br/> all players</button>
+				</div>
+				<br/>
+				<input id="update_stats_stop_btn" class="big-btn" type="button" onclick="stop_stats_update();" value="Stop" style="visibility:hidden;" />
+				<div>
+					<div id="stats_update_processing" style="text-align: center;">
+						<progress id="stats_update_progress" value="0" max="100" style="width: 100%; visibility:hidden;">
+						</progress>
+					</div>
+					<div id="stats_updater_status" style="min-height: 2em;">
+					</div>
+					
+					<br/>
+					<div id="stats_update_errors" style="color: red; visibility: hidden;">
+						<span id="stats_update_errors_count">N</span> errors occurred.<br/>
+						<a class="action-href" href="#" onclick="open_stats_update_log();">Click here to open log</a>
+					</div>
+				</div>
+				<br/>
+			</div>
+			
+		</div>
+		
+		<div class="cell">
+			<div class="tips">
+				<span class="tips-title">
+					<span style="color: white; text-shadow: 0 0 3px black; font: bold 26pt sans-serif;">?</span>
+					<!--<img src="rank_icons/bronze_small.png" style="display:inline-block;vertical-align: middle;" height="32">-->
+					How to use</span>
+				<br>
+				<ul>
+					<li>Add players by full BattleTag (PlayerName#1234 or PlayerName-1234). BattleTags are case-sensitive</li>
+					<li>Move players with <strong>drag & drop</strong> or <strong>double click</strong></li>
+					<li>Click 'Balance teams' to automatically swap players between teams for best balance</li>
+				</ul>
+				<span class="tips-title">
+					<!--<span style="color: white; text-shadow: 0 0 3px black; font: bold 26pt sans-serif;">?</span> -->
+					<img src="rank_icons/top500_small.png" style="display:inline-block;vertical-align: middle;" height="32">
+					Pro tips</span>
+				<br>
+				<ul>
+					<li><strong>Right click</strong> on player to edit name, SR and class</li>
+					<li>Team names are editable</li>
+					<li>Player list and all settings are automatically saved in your browser's storage</li>
+					<li>Player list can be imported and exported with buttons above lobby</li>
+					<li>Balance priority slider:
+						<ul>
+							<li>In leftmost position balancer will only account SR (as Blizzard do)</li>
+							<li>In intermediate position balancer will account both SR and hero classes in a given proportion</li>
+						</ul> 
+					</li>
+					<li>Click 'Balance teams' again to look through best balance variants</li>
+					<!--<li>Team captains (if enabled) will not be moved by autobalancer</li>-->
+				</ul>
+			</div>
+		</div>
+	</div>
+</div>
+
+<div id="popup_dlg_import_lobby" class="dlg" style="display:none">
+	<div class="dlg-background"></div>
+	<div class="dlg-container">
+		<div class="dlg-content">
+			<span class="team-title">Import players</span>
+			<input title="Close" type="button" class="team_btn dlg-close" onclick="close_dialog('popup_dlg_import_lobby');" value="X"/>
+			<br/>
+			<br/>
+			<div id="dlg_player_import_format" class="dlg_options">
+				<label for="dlg_player_import_format_value">Import format: </label>
+				<select id="dlg_player_import_format_value">
+					<option value="json">JSON (full info)</option>
+					<option value="text">text (btag, [SR, class, offclass])</option>
+				</select>
+			</div>
+						
+			<textarea id="dlg_textarea_import_lobby" rows="20" cols="80"></textarea>
+			
+			<div style="text-align: left;">
+			For text format, fields can be separated with space, tab or following symbols: . , ; | <br/>
+			SR, class and offclass are optional.
+			</div>
+			
+			<div>
+				<input id="dlg_ok" class="big-btn" type="button" value="OK" onclick="import_lobby_ok();"/>
+			</div>
+		</div>
+	</div>
+</div>	
+			
+
+<div id="popup_dlg_export_lobby" class="dlg" style="display:none">
+	<div class="dlg-background"></div>
+	<div class="dlg-container">
+		<div class="dlg-content">
+			<span class="team-title">Export players</span>
+			<input title="Close" type="button" class="team_btn dlg-close" onclick="close_dialog('popup_dlg_export_lobby');" value="X"/>
+			<br/>
+			<br/>
+			
+			<div id="dlg_lobby_export_format" class="dlg_options">
+				<label for="dlg_lobby_export_format_value">Export format: </label>
+				<select id="dlg_lobby_export_format_value"  onchange="export_lobby_dlg_change_format();">
+					<option value="json">JSON (full info)</option>
+					<option value="text">text (btags only)</option>
+					<option value="csv">CSV (for Excel)</option>
+				</select>
+			</div>
+					
+			<textarea id="dlg_textarea_export_lobby" rows="20" cols="80"></textarea>
+			
+			<div>
+				<input id="dlg_ok" class="big-btn" type="button" value="OK" onclick="close_dialog('popup_dlg_export_lobby');"/>
+			</div>
+		</div>
+	</div>
+</div>			
+			
+
+<div id="popup_dlg_export_teams" class="dlg" style="display:none">
+	<div class="dlg-background"></div>
+	<div class="dlg-container">
+		<div class="dlg-content">
+			<span class="team-title">Export teams</span>
+			<input title="Close" type="button" class="team_btn dlg-close" onclick="close_dialog('popup_dlg_export_teams');" value="X"/>
+			<br/>
+			<br/>
+			
+			<div id="dlg_team_export_format" class="dlg_options">
+				<label for="dlg_team_export_format_value">Format: </label>
+				<select id="dlg_team_export_format_value" onchange="export_teams_dlg_change_format();">
+					<option value="text-list">text list</option>
+					<option value="html-table">HTML table</option>
+					<option value="image">image</option>
+				</select>
+			</div>
+			<div id="dlg_team_export_options" class="dlg_options" onchange="export_teams_dlg_change_format();">
+				<input type="checkbox" id="dlg_team_export_sr">
+				<label for="dlg_team_export_sr">Include SR</label>
+				<br/>
+				<input type="checkbox" id="dlg_team_export_classes">
+				<label for="dlg_team_export_classes">Include classes/roles</label>
+				<br/>
+				<!--<input type="checkbox" id="dlg_team_export_captains">
+				<label for="dlg_team_export_captains">Mark team captains</label>
+				<br/>-->
+			</div>
+			
+			<textarea id="dlg_textarea_export_teams" rows="20" cols="80"></textarea>
+			<div id="dlg_html_export_teams" class="html-export-container"></div>
+			<div id="dlg_html_export_teams_hint" style="text-align: left;">
+				<br/>
+				<a class="action-href" href="#" onclick="export_teams_dlg_copy_html();">Click here</a> to copy teams table to clipboard. Paste to Excel or Google Sheets.
+				<br/>
+				<br/>
+			</div>
+			
+			<div>
+				<input id="dlg_ok" class="big-btn" type="button" value="OK" onclick="close_dialog('popup_dlg_export_teams');"/>
+			</div>
+		</div>
+	</div>
+</div>			
+			
+			
+<div id="popup_dlg_edit_player" class="dlg" style="display:none">
+	<div class="dlg-background"></div>
+	<div class="dlg-container">
+		<div class="dlg-content">
+			<span id="dlg_title_edit_player" class="team-title">Player name</span>
+			<input id="dlg_close" title="Close" type="button" class="team_btn dlg-close" onclick="close_dialog('popup_dlg_edit_player'); player_being_edited=undefined;" value="X"/>
+			<br/>
+			<br/>
+			
+			<div id="dlg_player_edit" class="dlg_options table">
+				<div class="row">
+					<div class="cell">BattleTag:</div>
+					<div class="cell">
+						<span id="dlg_player_private_profile" style="display:none" title="Private profile">&#128274;&#xFE0E;</span>
+						<a href="" id="dlg_player_id"></a>
+					</div>
+				</div>
+				<div class="row">
+					<div class="cell"><label for="dlg_player_display_name">Name:</label></div>
+					<div class="cell">
+						<input id="dlg_player_display_name" type="text">
+						<span id="dlg_player_name_edited" class="dlg-edited-mark" title="Name was manually edited" onclick="clear_edited_mark('ne');">&#9997;</span>
+					</div>
+				</div>
+				<div class="row">
+					<div class="cell"><label for="dlg_player_level">Level:</label></div>
+					<div class="cell"><input id="dlg_player_level" type="text" readonly></div>
+				</div>
+				<div class="row">
+					<div class="cell"><label for="dlg_player_sr">SR:</label></div>
+					<div class="cell">
+						<input id="dlg_player_sr" type="number" min=0 max=5000>
+						<span id="dlg_player_sr_edited" class="dlg-edited-mark" title="SR was manually edited" onclick="clear_edited_mark('se');">&#9997;</span>
+					</div>
+				</div>
+			</div>
+			<div id="dlg_class_select" class="dlg_options table">
+				<div class="row">
+					<div class="cell">Main class: </div>
+					<div class="cell">
+						<select id="dlg_main_class">
+							<option value="dps">dps</option>
+							<option value="tank">tank</option>
+							<option value="support">support</option>
+						</select>
+						<span id="dlg_player_class1_edited" class="dlg-edited-mark" title="Classes were manually edited" onclick="clear_edited_mark('ce');">&#9997;</span>
+					</div>
+				</div>
+				<div class="row">
+					<div class="cell">Secondary class: </div>
+					<div class="cell">
+						<select id="dlg_secondary_class">
+							<option value="">-</option>
+							<option value="dps">dps</option>
+							<option value="tank">tank</option>
+							<option value="support">support</option>
+						</select>
+						<span id="dlg_player_class2_edited" class="dlg-edited-mark" title="Classes were manually edited" onclick="clear_edited_mark('ce');">&#9997;</span>
+					</div>
+				</div>	
+			</div>
+			<div id="dlg_top_heroes">
+				<br/>
+				<span>Top heroes:</span>
+				<br/>
+				<div id="dlg_top_heroes_icons" class="hero-icon-list"></div>
+			</div>
+			
+			<div style="text-align: left;">
+				<br/>
+				Stats last updated: <span id="dlg_edit_player_last_updated"></span>
+				<br/>
+				<input id="dlg_update_player_stats" class="big-btn" type="button" value="&#8635; Update stats" onclick="update_current_player_stats();"/>
+				<br/>
+			</div>
+			<br/>
+			
+			<div style="height: 2em; vertical-align: middle; text-align: center;">
+				<div id="dlg_update_player_stats_loader" class="loader inline-loader" style="display: none;"></div>
+				<div id="dlg_edit_player_update_result" style="display: none;"></div>
+			</div>
+			
+			<br/>
+
+			<div>
+				<input id="dlg_ok" class="big-btn" type="button" value="OK" onclick="edit_player_ok();"/>
+			</div>
+		</div>
+	</div>
+</div>
+
+<div id="popup_dlg_settings" class="dlg" style="display:none">
+	<div class="dlg-background"></div>
+	<div class="dlg-container">
+		<div class="dlg-content">
+			<span class="team-title">Settings</span>
+			<input  title="Close" type="button" class="team_btn dlg-close" onclick="close_dialog('popup_dlg_settings');" value="X"/>
+			<br/>
+			<br/>	
+			
+			<div id="dlg_settings">
+				<div class="group">
+					<div class="group-header">
+						Main
+					</div>
+					<div class="group-content">
+						<div class="table">
+							<div class="row">
+								<div class="cell">
+									Team size &nbsp;
+								</div>
+								<div class="cell">
+									<input id="team_size" name="team_size" type="number" size=3 min=2 max=12 style="width: 3em;" value=""/> players
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+				
+				</br>
+				
+				<div class="group">
+					<div class="group-header">
+						Balancer
+					</div>
+					<div class="group-content">
+						<input type="checkbox" id="adjust_sr" onchange="adjust_sr_change();">
+						<label for="adjust_sr">Adjust player SR by main class</label>
+						</br>
+						<div class="subgroup" id="adjust_sr_sub">
+							<img src="class_icons/tank.png" style="height: 1em;"/>
+							<input disabled id="adjust_tank" class="percent" type="number" size=3 min=0 max=999 autocomplete="off" value="100"/>
+							% &nbsp;
+							
+							<img src="class_icons/dps.png" style="height: 1em;"/>
+							<input disabled id="adjust_dps" class="percent" type="number" size=3 min=0 max=999 autocomplete="off" value="120"/>
+							% &nbsp;
+							
+							<img src="class_icons/support.png" style="height: 1em;"/>
+							<input disabled id="adjust_support" class="percent" type="number" size=3 min=0 max=999 autocomplete="off" value="80"/>
+							%  </br>
+						</div>
+						
+						<div class="range-title">Balance priority</div>
+						<input id="balance_priority" type="range" size=3 min=0 max=100 autocomplete="off" value="70" style="width:90%"/>
+						</br>
+						<div class="range-sub-container">
+							<div class="range-sub range-sub-left">equal SR</div>
+							<div class="range-sub range-sub-right">equal classes</div>
+						</div>
+						
+						<input type="checkbox" id="separate_otps">
+						<label for="separate_otps">Do not place similar one-trick ponies into same team</label>
+						</br>
+						
+					</div>
+				</div>
+				
+				</br>
+				
+				<div class="group">
+					<div class="group-header">
+						Stats
+					</div>
+					<div class="group-content">
+					
+						Region &nbsp;
+						<select id="region">
+							<option value="eu">EU</option>
+							<option value="us">US</option>
+							<option value="kr">KR</option>
+						</select>
+						</br>
+					
+						<input type="checkbox" id="update_sr" checked>
+						<label for="update_sr">Update player SR</label>
+						</br>
+						<input type="checkbox" id="update_class" checked>
+						<label for="update_class">Update player class</label>
+						</br>
+						<input type="checkbox" id="update_edited_fields">
+						<label for="update_edited_fields">Force update manually edited fields (name, SR, class)</label>
+						</br>
+						
+						<input type="checkbox" id="update_picked">
+						<label for="update_picked">Update picked players, if stats older than </label>
+						<input id="update_picked_maxage" name="update_picked_maxage" type="number" size=4 min=0 max=9999 style="width: 4em;" /> days
+						</br>
+					</div>
+				</div>
+				<br/>
+			</div>
+			
+			<div style="padding-bottom: 1em;">
+				<input id="dlg_reset" class="big-btn" type="button" value="Restore defaults" onclick="reset_settings();"/>
+			</div>
+			<div>
+				<input id="dlg_ok" class="big-btn" type="button" value="OK" onclick="apply_settings();"/>
+			</div>
+		</div>
+	</div>
+</div>		
+
+
+<div id="popup_dlg_stats_update_init" class="dlg" style="display:none">
+	<div class="dlg-background"></div>
+	<div class="dlg-container">
+		<div class="dlg-content">
+			<span class="team-title">Update stats</span>
+			<input  title="Close" type="button" class="team_btn dlg-close" onclick="close_dialog('popup_dlg_stats_update_init');" value="X"/>
+			<br/>
+			<br/>
+			
+			<div style="width:25em; text-align: left;">
+				Update stats older than <span style="color:blue;" id="dlg_stats_update_days">0</span> days
+				</br>
+				
+				<input id="stats_update_limit" type="range" size=3 min=0 max=100 autocomplete="off" value="43" style="width:90%" oninput="on_stats_update_limit_change();"/>
+				</br>
+				</br>
+				
+				Stats older than <span id="dlg_stats_update_date">0</span> will be updated.
+							
+			</div>
+			</br>
+			</br>
+			
+			<div>
+				<input id="dlg_stats_update_ok" class="big-btn" type="button" value="OK"/>
+			</div>
+			
+		</div>
+	</div>
+</div>
+
+
+<div id="popup_dlg_stats_log" class="dlg" style="display:none">
+	<div class="dlg-background"></div>
+	<div class="dlg-container">
+		<div class="dlg-content">
+			<span class="team-title">Stats updater log</span>
+			<input title="Close" type="button" class="team_btn dlg-close" onclick="close_dialog('popup_dlg_stats_log');" value="X"/>
+			<br/>
+			<br/>
+									
+			<textarea readonly id="stats_update_log" rows="20" cols="80" autocomplete="off"></textarea>
+			
+			<div style="padding-bottom: 1em;">
+				<input id="dlg_reset" class="big-btn" type="button" value="Clear log" onclick="clear_stats_update_log();close_dialog('popup_dlg_stats_log');"/>
+			</div>
+			
+		</div>
+	</div>
+</div>
+
+
+			
+<div id="debug_log"></div>
+
+<script>
+// port saved players from v1
+var item_value = localStorage.getItem("saved_players");
+if ( item_value !== null ) {
+	localStorage.setItem( storage_prefix+"lobby", item_value );
+	localStorage.removeItem( "saved_players" );
+}
+
+var item_value = localStorage.getItem("saved_players_team1");
+if ( item_value !== null ) {
+	localStorage.setItem( storage_prefix+"team1", item_value );
+	localStorage.removeItem( "saved_players_team1" );
+}
+
+var item_value = localStorage.getItem("saved_players_team2");
+if ( item_value !== null ) {
+	localStorage.setItem( storage_prefix+"team2", item_value );
+	localStorage.removeItem( "saved_players_team2" );
+}
+
+// remove deprecated settings in storage from v1
+var old_settings_list = [
+	"region",
+	"team1_name",
+	"team2_name",
+	"balance_adjust_sr",
+	"balance_adjust_sr_dps",
+	"balance_adjust_sr_tank",
+	"balance_adjust_sr_support",
+	"balance_class_uneveness_value",
+	"balance_separate_otps",
+	"balance_enable_captains",
+	"update_class",
+	"update_sr",
+	"update_edited_fields",
+	"update_picked",
+	"dlg_setup_format",
+	"dlg_setup_share_sr",
+	"dlg_setup_share_classes",
+	"dlg_setup_share_options"
+	];
+for ( let i of old_settings_list ) {
+	localStorage.removeItem( i );
+}
+
+// restore team names
+for ( let id of ["team1_name", "team2_name"] ) {
+	var saved_team_name = localStorage.getItem( storage_prefix+id );
+	if ( saved_team_name !== null ) {
+		document.getElementById(id).value = saved_team_name;
+	}
+}
+
+// restore settings
+var saved_settings_json = localStorage.getItem( storage_prefix+"settings" );
+if ( saved_settings_json != null ) {
+	var saved_settings = JSON.parse(saved_settings_json);
+	for ( var i in Settings ) {
+		if ( saved_settings[i] !== undefined ) {
+			Settings[i] = saved_settings[i];
+		}
+	}
+}
+apply_stats_updater_settings();
+// convert team size to number 
+try {
+	Settings.team_size = Number(Settings.team_size);
+} catch(e) {
+	Settings.team_size = 6; // default
+};
+
+// port team size from v1 storage
+var item_value = localStorage.getItem("team_size");
+if ( item_value !== null ) {
+	try {
+		Settings.team_size = Number(item_value);
+	} catch(e) {};
+	localStorage.setItem( storage_prefix+"settings", JSON.stringify(Settings) );
+	localStorage.removeItem( "team_size" );
+}
+
+//restore saved players to teams
+restore_saved_teams();
+
+// restore export options
+var saved_export_options_json = localStorage.getItem( storage_prefix+"export_options" );
+if ( saved_export_options_json != null ) {
+	var saved_export_options = JSON.parse(saved_export_options_json);
+	for ( var i in ExportOptions ) {
+		if ( saved_export_options[i] !== undefined ) {
+			ExportOptions[i] = saved_export_options[i];
+		}
+	}
+}
+
+// adjust lobby margin to account scrollbar width
+var lobby_container = document.getElementsByClassName("lobby-container").item(0);
+lobby_container.style.marginRight = "-"+get_scrollbar_width()+"px";
+lobby_container.style.paddingRight = ""+get_scrollbar_width()+"px";
+
+// load class and rank icons and convert them to data:uri strings, for team export
+prepare_datauri_icons();
+</script>
+</body>
+</html>
